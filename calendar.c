@@ -12,6 +12,30 @@
 #define BOLD      "\033[1m"
 #define CLEAR     printf("\033[2J\033[1;1H")
 
+#define MAX_LOG_FILE_SIZE 1048576  // 1MB
+
+void log_message(const char *level, const char *message, FILE *logfile) {
+    time_t now;
+    time(&now);
+    char *timestamp = ctime(&now);
+    timestamp[strlen(timestamp) - 1] = '\0'; // Remove newline character
+    fprintf(logfile, "[%s] %s: %s\n", timestamp, level, message);
+}
+
+void rotate_log_file(FILE **logfile) {
+    fseek(*logfile, 0, SEEK_END);
+    long filesize = ftell(*logfile);
+    if (filesize >= MAX_LOG_FILE_SIZE) {
+        fclose(*logfile);
+        rename("log.txt", "log_old.txt");
+        *logfile = fopen("log.txt", "a");
+        if (*logfile == NULL) {
+            printf("ERROR: Could not open new log file\n");
+            exit(1);
+        }
+        log_message("INFO", "Log file rotated", *logfile);
+    }
+}
 
 int get_first_day_of_month(int year, int month) {
     if (month < 3) {
@@ -172,7 +196,17 @@ int main() {
     char sql[200];
     char *err_msg = 0;
 
-    // SQLiteデータベースを開く
+    FILE *logfile = fopen("log.txt", "a");
+    if (logfile == NULL) {
+        printf("ERROR: Could not open log file\n");
+        return 1;
+    }
+
+    rotate_log_file(&logfile);
+
+    log_message("INFO", "Starting the program...", logfile);
+    log_message("INFO", "Open database...", logfile);
+
     int rc = sqlite3_open("event.db", &db);
     if (rc != SQLITE_OK) {
         fprintf(stderr, "Cannot open database: %s\n", sqlite3_errmsg(db));
@@ -180,7 +214,7 @@ int main() {
         return 1;
     }
 
-    // テーブルを作成
+    log_message("INFO", "Create table...", logfile);
     sprintf(sql, "CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY, date TEXT, memo TEXT);");
     rc = sqlite3_exec(db, sql, 0, 0, &err_msg);
     if (rc != SQLITE_OK ) {
@@ -208,23 +242,30 @@ int main() {
 
         switch(c) {
             case 'n':
+                log_message("INFO", "Next month selected", logfile);
                 update_date(&year, &month, 1);
                 break;
             case 'p':
+                log_message("INFO", "Previous month selected", logfile);
                 update_date(&year, &month, -1);
                 break;
             case 's':
+                log_message("INFO", "Specific date selected", logfile);
                 get_user_date(&year, &month);
                 break;
             case 'a':
+                log_message("INFO", "Add event selected", logfile);
                 add_event(db, year, month);
                 break;
             case 'c':
+                log_message("INFO", "Check events selected", logfile);
                 show_events(db, year, month);
                 break;
             case 'q':
                 printf("プログラムを終了します。\n");
+                log_message("INFO", "Close the program...", logfile);
                 sqlite3_close(db);
+                fclose(logfile);
                 return 0;
             default:
                 printf("無効な入力です。\n");
@@ -247,7 +288,9 @@ int main() {
         while (getchar() != '\n');
     }
 
+    log_message("INFO", "Close the program...", logfile);
     sqlite3_close(db);
+    fclose(logfile);
     return 0;
 }
 
